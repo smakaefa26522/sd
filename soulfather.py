@@ -13,8 +13,9 @@ from threading import Thread
 
 loop = asyncio.get_event_loop()
 
-TOKEN = '7964108900:AAH1ejEUsTrMh2fElb-6WzuCY2g-kOSm7f4'
-MONGO_URI = 'mongodb+srv://rishi:ipxkingyt@rishiv.ncljp.mongodb.net/?retryWrites=true&w=majority&appName=rishiv'
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+MONGO_URI = os.getenv("MONGODB_URI")
+
 FORWARD_CHANNEL_ID = -1002156421934
 CHANNEL_ID = -1002156421934
 error_channel_id = -1002156421934
@@ -291,7 +292,7 @@ if __name__ == "__main__":
     logging.info("KRISHNA SERVER RUNNING.....")
     while True:
         try:
-            bot.polling(none_stop=True)
+            bot.polling(none_stop=True, interval=3, timeout=20)
         except Exception as e:
             logging.error(f"An error occurred while polling: {e}")
         logging.info(f"Waiting for {REQUEST_INTERVAL} seconds before the next request...")
